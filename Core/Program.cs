@@ -1,7 +1,7 @@
 ﻿// Copyright (c) Tunnel Vision Laboratories, LLC. All Rights Reserved.
 // Licensed under the Apache License, Version 2.0. See LICENSE in the project root for license information.
 
-namespace StyleCopTester
+namespace StyleCop.Console
 {
     using System;
     using System.Collections.Concurrent;
@@ -96,7 +96,7 @@ namespace StyleCopTester
             LoadDefaultAssemblies();
 
             // A valid call must have at least one parameter (a solution file). Optionally it can include /all or /id:SAXXXX.
-            if (args.Length < 1)
+            if (args.Where(a => a.StartsWith("/") == false).Count() < 1)
             {
                 PrintHelp();
             }
