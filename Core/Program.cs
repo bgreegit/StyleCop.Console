@@ -69,7 +69,7 @@ namespace StyleCopTester
             }
         }
 
-        private static async Task MainAsync(string[] args, CancellationToken cancellationToken)
+        private static void LoadDefaultAssemblies()
         {
             string path = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
 
@@ -88,6 +88,12 @@ namespace StyleCopTester
                 Console.Error.WriteLine("Error: Cannot load StyleCop.Analyzers dlls");
                 return;
             }
+        }
+
+        private static async Task MainAsync(string[] args, CancellationToken cancellationToken)
+        {
+            // Load StyleCop.Analyzers related dll
+            LoadDefaultAssemblies();
 
             // A valid call must have at least one parameter (a solution file). Optionally it can include /all or /id:SAXXXX.
             if (args.Length < 1)
