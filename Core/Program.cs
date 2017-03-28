@@ -26,9 +26,8 @@ namespace StyleCop.Console
     using Path = System.IO.Path;
 
     /// <summary>
-    /// StyleCopTester is a tool that will analyze a solution, find diagnostics in it and will print out the number of
-    /// diagnostics it could find. This is useful to easily test performance without having the overhead of visual
-    /// studio running.
+    /// StyleCop.Console is simple tool for find diagnostics on solution,
+    /// origially from StyleCop.Analyzers's StyleCopTester sample project
     /// </summary>
     internal static class Program
     {
@@ -90,7 +89,7 @@ namespace StyleCop.Console
             }
         }
 
-        private static async Task MainAsync(string[] args, CancellationToken cancellationToken)
+        private static async Task<int> MainAsync(string[] args, CancellationToken cancellationToken)
         {
             // Load StyleCop.Analyzers related dll
             LoadDefaultAssemblies();
@@ -99,88 +98,75 @@ namespace StyleCop.Console
             if (args.Where(a => a.StartsWith("/") == false).Count() < 1)
             {
                 PrintHelp();
+                return -1;
             }
-            else
+
+            bool applyChanges = args.Contains("/apply");
+            if (applyChanges)
             {
-                bool applyChanges = args.Contains("/apply");
-                if (applyChanges)
+                if (!args.Contains("/fixall"))
                 {
-                    if (!args.Contains("/fixall"))
-                    {
-                        Console.Error.WriteLine("Error: /apply can only be used with /fixall");
-                        return;
-                    }
-                }
-
-                Stopwatch stopwatch = Stopwatch.StartNew();
-                var analyzers = GetAllAnalyzers();
-
-                analyzers = FilterAnalyzers(analyzers, args).ToImmutableArray();
-
-                if (analyzers.Length == 0)
-                {
-                    PrintHelp();
-                    return;
-                }
-
-                MSBuildWorkspace workspace = MSBuildWorkspace.Create();
-                string solutionPath = args.SingleOrDefault(i => !i.StartsWith("/", StringComparison.Ordinal));
-                Solution solution = await workspace.OpenSolutionAsync(solutionPath, cancellationToken).ConfigureAwait(false);
-
-                Console.WriteLine($"Loaded solution in {stopwatch.ElapsedMilliseconds}ms");
-
-                if (args.Contains("/stats"))
-                {
-                    List<Project> csharpProjects = solution.Projects.Where(i => i.Language == LanguageNames.CSharp).ToList();
-
-                    Console.WriteLine("Number of projects:\t\t" + csharpProjects.Count);
-                    Console.WriteLine("Number of documents:\t\t" + csharpProjects.Sum(x => x.DocumentIds.Count));
-
-                    var statistics = await GetAnalyzerStatisticsAsync(csharpProjects, cancellationToken).ConfigureAwait(true);
-
-                    Console.WriteLine("Number of syntax nodes:\t\t" + statistics.NumberofNodes);
-                    Console.WriteLine("Number of syntax tokens:\t" + statistics.NumberOfTokens);
-                    Console.WriteLine("Number of syntax trivia:\t" + statistics.NumberOfTrivia);
-                }
-
-                stopwatch.Restart();
-
-                var diagnostics = await GetAnalyzerDiagnosticsAsync(solution, solutionPath, analyzers, cancellationToken).ConfigureAwait(true);
-                var allDiagnostics = diagnostics.SelectMany(i => i.Value).ToImmutableArray();
-
-                Console.WriteLine($"Found {allDiagnostics.Length} diagnostics in {stopwatch.ElapsedMilliseconds}ms");
-
-                foreach (var group in allDiagnostics.GroupBy(i => i.Id).OrderBy(i => i.Key, StringComparer.OrdinalIgnoreCase))
-                {
-                    Console.WriteLine($"  {group.Key}: {group.Count()} instances");
-
-                    // Print out analyzer diagnostics like AD0001 for analyzer exceptions
-                    if (group.Key.StartsWith("AD", StringComparison.Ordinal))
-                    {
-                        foreach (var item in group)
-                        {
-                            Console.WriteLine(item);
-                        }
-                    }
-                }
-
-                string logArgument = args.FirstOrDefault(x => x.StartsWith("/log:"));
-                if (logArgument != null)
-                {
-                    string fileName = logArgument.Substring(logArgument.IndexOf(':') + 1);
-                    WriteDiagnosticResults(diagnostics.SelectMany(i => i.Value.Select(j => Tuple.Create(i.Key, j))).ToImmutableArray(), fileName);
-                }
-
-                if (args.Contains("/codefixes"))
-                {
-                    await TestCodeFixesAsync(stopwatch, solution, allDiagnostics, cancellationToken).ConfigureAwait(true);
-                }
-
-                if (args.Contains("/fixall"))
-                {
-                    await TestFixAllAsync(stopwatch, solution, diagnostics, applyChanges, cancellationToken).ConfigureAwait(true);
+                    Console.Error.WriteLine("Error: /apply can only be used with /fixall");
+                    return -1;
                 }
             }
+
+            Stopwatch stopwatch = Stopwatch.StartNew();
+            var analyzers = GetAllAnalyzers();
+
+            analyzers = FilterAnalyzers(analyzers, args).ToImmutableArray();
+
+            if (analyzers.Length == 0)
+            {
+                PrintHelp();
+                return -1;
+            }
+
+            MSBuildWorkspace workspace = MSBuildWorkspace.Create();
+            string solutionPath = args.SingleOrDefault(i => !i.StartsWith("/", StringComparison.Ordinal));
+            Solution solution = await workspace.OpenSolutionAsync(solutionPath, cancellationToken).ConfigureAwait(false);
+
+            Console.WriteLine($"Loaded solution in {stopwatch.ElapsedMilliseconds}ms");
+
+            stopwatch.Restart();
+
+            var diagnostics = await GetAnalyzerDiagnosticsAsync(solution, solutionPath, analyzers, cancellationToken).ConfigureAwait(true);
+            var allDiagnostics = diagnostics.SelectMany(i => i.Value).ToImmutableArray();
+
+            Console.WriteLine($"Found {allDiagnostics.Length} diagnostics in {stopwatch.ElapsedMilliseconds}ms");
+
+            foreach (var group in allDiagnostics.GroupBy(i => i.Id).OrderBy(i => i.Key, StringComparer.OrdinalIgnoreCase))
+            {
+                Console.WriteLine($"  {group.Key}: {group.Count()} instances");
+
+                // Print out analyzer diagnostics like AD0001 for analyzer exceptions
+                if (group.Key.StartsWith("AD", StringComparison.Ordinal))
+                {
+                    foreach (var item in group)
+                    {
+                        Console.WriteLine(item);
+                    }
+                }
+            }
+
+            string logArgument = args.FirstOrDefault(x => x.StartsWith("/log:"));
+            if (logArgument != null)
+            {
+                string fileName = logArgument.Substring(logArgument.IndexOf(':') + 1);
+                WriteDiagnosticResults(diagnostics.SelectMany(i => i.Value.Select(j => Tuple.Create(i.Key, j))).ToImmutableArray(), fileName);
+            }
+
+            if (args.Contains("/codefixes"))
+            {
+                await TestCodeFixesAsync(solution, allDiagnostics, cancellationToken).ConfigureAwait(true);
+            }
+
+            if (args.Contains("/fixall"))
+            {
+                await TestFixAllAsync(solution, diagnostics, applyChanges, cancellationToken).ConfigureAwait(true);
+            }
+
+            return 0;
         }
 
         private static void WriteDiagnosticResults(ImmutableArray<Tuple<ProjectId, Diagnostic>> diagnostics, string fileName)
@@ -215,7 +201,7 @@ namespace StyleCop.Console
             File.WriteAllText(uniqueFileName, uniqueOutput.ToString(), Encoding.UTF8);
         }
 
-        private static async Task TestFixAllAsync(Stopwatch stopwatch, Solution solution, ImmutableDictionary<ProjectId, ImmutableArray<Diagnostic>> diagnostics, bool applyChanges, CancellationToken cancellationToken)
+        private static async Task TestFixAllAsync(Solution solution, ImmutableDictionary<ProjectId, ImmutableArray<Diagnostic>> diagnostics, bool applyChanges, CancellationToken cancellationToken)
         {
             Console.WriteLine("Calculating fixes");
 
@@ -239,9 +225,12 @@ namespace StyleCop.Console
 
             foreach (var fix in equivalenceGroups)
             {
+                var stopwatch = new Stopwatch();
+
                 try
                 {
                     stopwatch.Restart();
+
                     Console.WriteLine($"Calculating fix for {fix.CodeFixEquivalenceKey} using {fix.FixAllProvider} for {fix.NumberOfDiagnostics} instances.");
                     var operations = await fix.GetOperationsAsync(cancellationToken).ConfigureAwait(true);
                     if (applyChanges)
@@ -279,7 +268,7 @@ namespace StyleCop.Console
             Console.ResetColor();
         }
 
-        private static async Task TestCodeFixesAsync(Stopwatch stopwatch, Solution solution, ImmutableArray<Diagnostic> diagnostics, CancellationToken cancellationToken)
+        private static async Task TestCodeFixesAsync(Solution solution, ImmutableArray<Diagnostic> diagnostics, CancellationToken cancellationToken)
         {
             Console.WriteLine("Calculating fixes");
 
@@ -299,7 +288,8 @@ namespace StyleCop.Console
 
             Console.WriteLine("Calculating changes");
 
-            stopwatch.Restart();
+            var stopwatch = new Stopwatch();
+            stopwatch.Start();
 
             object lockObject = new object();
 
@@ -330,35 +320,6 @@ namespace StyleCop.Console
             await codeFixProvider.RegisterCodeFixesAsync(new CodeFixContext(solution.GetDocument(diagnostic.Location.SourceTree), diagnostic, (a, d) => codeActions.Add(a), cancellationToken)).ConfigureAwait(false);
 
             return codeActions;
-        }
-
-        private static Task<Statistic> GetAnalyzerStatisticsAsync(IEnumerable<Project> projects, CancellationToken cancellationToken)
-        {
-            ConcurrentBag<Statistic> sums = new ConcurrentBag<Statistic>();
-
-            Parallel.ForEach(projects.SelectMany(i => i.Documents), document =>
-            {
-                var documentStatistics = GetAnalyzerStatisticsAsync(document, cancellationToken).ConfigureAwait(false).GetAwaiter().GetResult();
-                sums.Add(documentStatistics);
-            });
-
-            Statistic sum = sums.Aggregate(new Statistic(0, 0, 0), (currentResult, value) => currentResult + value);
-            return Task.FromResult(sum);
-        }
-
-        private static async Task<Statistic> GetAnalyzerStatisticsAsync(Document document, CancellationToken cancellationToken)
-        {
-            SyntaxTree tree = await document.GetSyntaxTreeAsync(cancellationToken).ConfigureAwait(false);
-
-            SyntaxNode root = await tree.GetRootAsync(cancellationToken).ConfigureAwait(false);
-
-            var tokensAndNodes = root.DescendantNodesAndTokensAndSelf(descendIntoTrivia: true);
-
-            int numberOfNodes = tokensAndNodes.Count(x => x.IsNode);
-            int numberOfTokens = tokensAndNodes.Count(x => x.IsToken);
-            int numberOfTrivia = root.DescendantTrivia(descendIntoTrivia: true).Count();
-
-            return new Statistic(numberOfNodes, numberOfTokens, numberOfTrivia);
         }
 
         private static IEnumerable<DiagnosticAnalyzer> FilterAnalyzers(IEnumerable<DiagnosticAnalyzer> analyzers, string[] args)
@@ -516,7 +477,6 @@ namespace StyleCop.Console
             Console.WriteLine("Usage: StyleCopTester [options] <Solution>");
             Console.WriteLine("Options:");
             Console.WriteLine("/all       Run all StyleCopAnalyzers analyzers, including ones that are disabled by default");
-            Console.WriteLine("/stats     Display statistics of the solution");
             Console.WriteLine("/codefixes Test single code fixes");
             Console.WriteLine("/fixall    Test fix all providers");
             Console.WriteLine("/id:<id>   Enable analyzer with diagnostic ID < id > (when this is specified, only this analyzer is enabled)");
