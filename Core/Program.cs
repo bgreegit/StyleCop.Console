@@ -15,6 +15,7 @@ namespace StyleCop.Console
     using System.Threading;
     using System.Threading.Tasks;
     using System.Windows.Threading;
+    using System.Xml;
     using Microsoft.CodeAnalysis;
     using Microsoft.CodeAnalysis.CodeActions;
     using Microsoft.CodeAnalysis.CodeFixes;
@@ -33,6 +34,7 @@ namespace StyleCop.Console
     {
         private static Assembly styleCopAnalyzersDll;
         private static Assembly styleCopAnalyzersCodeFixesDll;
+        private static Tuple<string, ReportDiagnostic>[] styleCopRuleset;
         private static bool isVerbose;
 
         private static void Main(string[] args)
@@ -83,6 +85,23 @@ namespace StyleCop.Console
             // Load StyleCop.Analyzers related dll
             LoadDefaultAssemblies();
 
+            // Load ruleset
+            string ruleSetArg = args.FirstOrDefault(x => x.StartsWith("/ruleset:"));
+            if (ruleSetArg != null)
+            {
+                string ruleSetFilePath = ruleSetArg.Substring(ruleSetArg.IndexOf(':') + 1);
+                styleCopRuleset = LoadRuleSet(ruleSetFilePath);
+                if (styleCopRuleset == null)
+                {
+                    WriteError($"Error: Cannot load ruleset file");
+                    return -1;
+                }
+            }
+            else
+            {
+                styleCopRuleset = new Tuple<string, ReportDiagnostic>[0];
+            }
+
             // verbose option
             isVerbose = args.Contains("/verbose") || args.Contains("/v");
 
@@ -101,8 +120,6 @@ namespace StyleCop.Console
             string fixArg = args.FirstOrDefault(x => x.StartsWith("/fix:"));
             if (fixArg == null)
             {
-                // TODO read ruleset file from arg
-
                 // find and filter analyzers
                 var analyzers = FilterAnalyzers(GetAllAnalyzers(), args).ToImmutableArray();
                 if (analyzers.Length == 0)
@@ -358,10 +375,10 @@ namespace StyleCop.Console
         {
             var supportedDiagnosticsSpecificOptions = new Dictionary<string, ReportDiagnostic>();
 
-            // DEBUG bgree
-            supportedDiagnosticsSpecificOptions["SA1600"] = ReportDiagnostic.Suppress;
-            supportedDiagnosticsSpecificOptions["SA1516"] = ReportDiagnostic.Suppress;
-            supportedDiagnosticsSpecificOptions["SA1515"] = ReportDiagnostic.Suppress;
+            foreach (var rule in styleCopRuleset)
+            {
+                supportedDiagnosticsSpecificOptions[rule.Item1] = rule.Item2;
+            }
 
             // Report exceptions during the analysis process as errors
             supportedDiagnosticsSpecificOptions.Add("AD0001", ReportDiagnostic.Error);
@@ -375,11 +392,55 @@ namespace StyleCop.Console
             CompilationWithAnalyzers compilationWithAnalyzers = compilation.WithAnalyzers(analyzers, new CompilationWithAnalyzersOptions(new AnalyzerOptions(ImmutableArray.Create<AdditionalText>()), null, true, false));
 
             var diagnostics = await FixAllContextHelper.GetAllDiagnosticsAsync(compilation, compilationWithAnalyzers, analyzers, project.Documents, true, cancellationToken).ConfigureAwait(false);
+            diagnostics = diagnostics.Where(d => d.Id.StartsWith("SA")).ToImmutableArray();
 
             // DEBUG bgree filter on diagnostics
             diagnostics = diagnostics.Where(d => !d.Location.SourceTree.FilePath.Contains("ExternalLib")).ToImmutableArray();
 
             return diagnostics;
+        }
+
+        private static Tuple<string, ReportDiagnostic>[] LoadRuleSet(string filePath)
+        {
+            XmlDocument xmldoc = new XmlDocument();
+
+            try
+            {
+                xmldoc.Load(filePath);
+            }
+            catch (Exception ex)
+            {
+                WriteError($"RuleSet file load failed path={filePath} ex={ex}");
+                return null;
+            }
+
+            XmlElement root = xmldoc.DocumentElement;
+            var styleCopRulesNode = root.ChildNodes.Cast<XmlNode>()
+                .Where(n => n is XmlElement).Cast<XmlElement>()
+                .Where(e => e.HasAttribute("AnalyzerId") && e.GetAttribute("AnalyzerId") == "StyleCop.Analyzers")
+                .Where(e => e.HasAttribute("RuleNamespace") && e.GetAttribute("RuleNamespace") == "StyleCop.Analyzers")
+                .FirstOrDefault();
+            if (styleCopRulesNode == null)
+            {
+                WriteError($"RuleSet file doesn't have StyleCop.Analyzers rules");
+                return null;
+            }
+
+            try
+            {
+                return styleCopRulesNode.ChildNodes.Cast<XmlNode>()
+                    .Where(n => n is XmlElement).Cast<XmlElement>()
+                    .Where(e => e.Name == "Rule" && e.HasAttribute("Id") && e.HasAttribute("Action"))
+                    .Select(e => Tuple.Create(
+                        e.GetAttribute("Id"),
+                        (ReportDiagnostic)(string.Compare(e.GetAttribute("Action"), "None", true) != 0 ? Enum.Parse(typeof(ReportDiagnostic), e.GetAttribute("Action"), true) : ReportDiagnostic.Suppress)))
+                    .ToArray();
+            }
+            catch (Exception)
+            {
+                WriteError($"RuleSet rule has StyleCop.Analyzers rules");
+                return null;
+            }
         }
 
         private static void WriteOutput(string text, ConsoleColor? color = null)
