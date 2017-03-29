@@ -78,27 +78,6 @@ namespace StyleCop.Console
             WriteOutput("    /verbose /v  Output verbose log to console (A log starts with #)");
         }
 
-        private static void LoadDefaultAssemblies()
-        {
-            string path = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
-
-            var styleCopAnalyzersDllFiles = Directory.GetFiles(path, "StyleCop.Analyzers.dll");
-            var styleCopAnalyzersCodeFixesDllFile = Directory.GetFiles(path, "StyleCop.Analyzers.CodeFixes.dll");
-            if (styleCopAnalyzersDllFiles.Count() != 1 || styleCopAnalyzersCodeFixesDllFile.Count() != 1)
-            {
-                WriteError("Error: Cannot read StyleCop.Analyzers dll files");
-                return;
-            }
-
-            styleCopAnalyzersDll = Assembly.LoadFile(styleCopAnalyzersDllFiles.First());
-            styleCopAnalyzersCodeFixesDll = Assembly.LoadFile(styleCopAnalyzersCodeFixesDllFile.First());
-            if (styleCopAnalyzersDll == null || styleCopAnalyzersCodeFixesDll == null)
-            {
-                WriteError("Error: Cannot load StyleCop.Analyzers dlls");
-                return;
-            }
-        }
-
         private static async Task<int> MainAsync(string[] args, CancellationToken cancellationToken)
         {
             // Load StyleCop.Analyzers related dll
@@ -172,6 +151,27 @@ namespace StyleCop.Console
             }
 
             return 0;
+        }
+
+        private static void LoadDefaultAssemblies()
+        {
+            string path = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+
+            var styleCopAnalyzersDllFiles = Directory.GetFiles(path, "StyleCop.Analyzers.dll");
+            var styleCopAnalyzersCodeFixesDllFile = Directory.GetFiles(path, "StyleCop.Analyzers.CodeFixes.dll");
+            if (styleCopAnalyzersDllFiles.Count() != 1 || styleCopAnalyzersCodeFixesDllFile.Count() != 1)
+            {
+                WriteError("Error: Cannot read StyleCop.Analyzers dll files");
+                return;
+            }
+
+            styleCopAnalyzersDll = Assembly.LoadFile(styleCopAnalyzersDllFiles.First());
+            styleCopAnalyzersCodeFixesDll = Assembly.LoadFile(styleCopAnalyzersCodeFixesDllFile.First());
+            if (styleCopAnalyzersDll == null || styleCopAnalyzersCodeFixesDll == null)
+            {
+                WriteError("Error: Cannot load StyleCop.Analyzers dlls");
+                return;
+            }
         }
 
         private static void WriteDiagnosticResults(ImmutableArray<Tuple<ProjectId, Diagnostic>> diagnostics)
